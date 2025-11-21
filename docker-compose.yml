@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: distributor-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: distributor_app
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - distributor-network
+
+  # Redis for caching and BullMQ
+  redis:
+    image: redis:7.2-alpine
+    container_name: distributor-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - distributor-network
+
+  # Backend API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: distributor-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "mongodb://admin:password123@mongodb:27017/distributor_app?authSource=admin"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "production-jwt-secret-key-min-32-characters-long"
+      JWT_REFRESH_SECRET: "production-jwt-refresh-secret-key-min-32-characters"
+      FRONTEND_URL: "http://localhost:3000"
+      LOG_LEVEL: "info"
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - ./apps/api/logs:/app/logs
+    networks:
+      - distributor-network
+
+  # Next.js Frontend
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    container_name: distributor-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:3001"
+      NODE_ENV: production
+    depends_on:
+      - api
+    networks:
+      - distributor-network
+
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  distributor-network:
+    driver: bridge
