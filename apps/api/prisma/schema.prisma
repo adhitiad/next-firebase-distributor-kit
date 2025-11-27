@@ -1,0 +1,189 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// User model with RBAC roles
+model User {
+  id             String   @id @map("_id") @default(auto())
+  email          String   @unique
+  hashedPassword String
+  role           UserRole // Owner, AdminEntry, AdminManual, Kasir, Sales
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  transactions   Transaction[]
+
+  @@map("users")
+}
+
+// User roles enum
+enum UserRole {
+  OWNER
+  ADMIN_ENTRY
+  ADMIN_MANUAL
+  KASIR
+  SALES
+}
+
+// Product model with SKU and pricing
+model Product {
+  id          String   @id @map("_id") @default(auto())
+  name        String
+  sku         String   @unique
+  description String?
+  costPrice   Float    // Modal price
+  basePrice   Float    // Standard selling price
+  stock       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  priceSchemes   PriceScheme[]
+  stockMovements StockMovement[]
+  transactions   Transaction[]
+
+  // Indexes for performance
+  @@index([sku])
+  @@index([isActive])
+  @@map("products")
+}
+
+// Price scheme model for tiered discounts
+model PriceScheme {
+  id                String   @id @map("_id") @default(auto())
+  minAmount         Float    // Minimum amount for this scheme
+  maxAmount         Float    // Maximum amount for this scheme
+  discountPercentage Float    // Discount percentage (e.g., 1.5 for 1.5%)
+  isActive          Boolean  @default(true)
+  note              String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("priceSchemes")
+}
+
+// Stock tracking per warehouse
+model Stock {
+  id         String   @id @map("_id") @default(auto())
+  productId  String
+  warehouseId String
+  quantity   Int      @default(0)
+  safetyThreshold Int @default(10) // Alert threshold
+  lastUpdated DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  // Relations
+  product     Product @relation(fields: [productId], references: [id])
+
+  // Compound index for product+warehouse lookup
+  @@index([productId, warehouseId])
+  @@map("stocks")
+}
+
+// Stock movement tracking (FIFO)
+model StockMovement {
+  id         String   @id @map("_id") @default(auto())
+  productId  String
+  warehouseId String
+  movementType MovementType // IN, OUT, ADJUSTMENT
+  quantity   Int
+  unitCost   Float? // For IN movements
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  product    Product @relation(fields: [productId], references: [id])
+
+  @@index([productId, createdAt])
+  @@map("stockMovements")
+}
+
+// Stock movement types
+enum MovementType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
+// Transaction model for sales
+model Transaction {
+  id            String           @id @map("_id") @default(auto())
+  transactionNumber String       @unique
+  items         TransactionItem[]
+  totalAmount   Float
+  finalAmount   Float // After discounts
+  paymentStatus PaymentStatus
+  paymentMethod String?
+  performedBy   String
+  customerId    String?
+  notes         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  // Relations
+  user          User             @relation(fields: [performedBy], references: [id])
+
+  @@index([transactionNumber])
+  @@index([performedBy])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+// Transaction items
+model TransactionItem {
+  id           String @id @map("_id") @default(auto())
+  transactionId String
+  productId    String
+  quantity     Int
+  unitPrice    Float
+  discountAmount Float @default(0)
+  finalPrice   Float
+
+  @@index([transactionId])
+  @@index([productId])
+  @@map("transactionItems")
+}
+
+// Payment status enum
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIAL
+  FAILED
+  REFUNDED
+}
+
+// Background job tracking
+model JobQueue {
+  id        String   @id @map("_id") @default(auto())
+  jobType   String   // STOCK_ALERT, CSV_IMPORT, etc.
+  status    JobStatus
+  payload   String?  // JSON string
+  attempts  Int      @default(0)
+  maxAttempts Int    @default(3)
+  error     String?
+  createdAt DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([status, createdAt])
+  @@map("jobQueues")
+}
+
+// Job status enum
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
